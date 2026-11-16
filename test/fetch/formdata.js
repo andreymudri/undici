@@ -406,3 +406,27 @@ test('.formData() rejects malformed multipart header line ending with bare CR', 
 
   await t.assert.rejects(request.formData(), TypeError)
 })
+
+test('.formData() parses a file part when globalThis.File is replaced', async (t) => {
+  const { File: OriginalFile } = globalThis
+  t.after(() => { globalThis.File = OriginalFile })
+  globalThis.File = class File extends Blob {
+    constructor (bits, name, options) {
+      super(bits, options)
+      this.name = name
+    }
+  }
+
+  const response = new Response(
+    '--b\r\n' +
+    'Content-Disposition: form-data; name="f"; filename="a.txt"\r\n' +
+    'Content-Type: text/plain\r\n\r\n' +
+    'hello\r\n' +
+    '--b--\r\n',
+    { headers: { 'content-type': 'multipart/form-data; boundary=b' } }
+  )
+
+  const file = (await response.formData()).get('f')
+  t.assert.strictEqual(file.name, 'a.txt')
+  t.assert.strictEqual(await file.text(), 'hello')
+})
