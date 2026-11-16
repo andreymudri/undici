@@ -1,6 +1,8 @@
 'use strict'
 
 const { test } = require('node:test')
+const { execFile } = require('node:child_process')
+const { promisify } = require('node:util')
 const { FormData, Response, Request } = require('../../')
 const { isFormDataLike } = require('../../lib/core/util')
 
@@ -429,4 +431,29 @@ test('.formData() parses a file part when globalThis.File is replaced', async (t
   const file = (await response.formData()).get('f')
   t.assert.strictEqual(file.name, 'a.txt')
   t.assert.strictEqual(await file.text(), 'hello')
+})
+
+test('.formData() parses a file part when globalThis.File is replaced before undici loads', async (t) => {
+  const script = `
+    globalThis.File = class File extends Blob {
+      constructor (bits, name, options) {
+        super(bits, options)
+        this.name = name
+      }
+    }
+    const { Response } = require(${JSON.stringify(require.resolve('../../'))})
+    new Response(
+      '--b\\r\\n' +
+      'Content-Disposition: form-data; name="f"; filename="a.txt"\\r\\n' +
+      'Content-Type: text/plain\\r\\n\\r\\n' +
+      'hello\\r\\n' +
+      '--b--\\r\\n',
+      { headers: { 'content-type': 'multipart/form-data; boundary=b' } }
+    ).formData()
+      .then((formData) => formData.get('f').text())
+      .then((text) => process.stdout.write(text))
+  `
+
+  const { stdout } = await promisify(execFile)(process.execPath, ['-e', script], { timeout: 30000 })
+  t.assert.strictEqual(stdout, 'hello')
 })
